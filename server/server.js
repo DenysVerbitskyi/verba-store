@@ -17,6 +17,8 @@ const SECRET_KEY = "your-secret-key-change-in-production";
 const EMAIL_USER = process.env.EMAIL_USER || "your-email@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@example.com";
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
 // Create email transporter (will work if credentials are set)
 let emailTransporter = null;
@@ -78,33 +80,13 @@ const authenticateToken = (req, res, next) => {
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
 
-  const user = db.getUserByUsername(username);
-
-  if (!user) {
-    return res.status(400).json({ error: "User not found" });
+  // Перевірка через environment variables
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    const token = jwt.sign({ id: 1, username: ADMIN_USERNAME }, SECRET_KEY);
+    return res.json({ token });
   }
 
-  const validPassword = await bcrypt.compare(password, user.password);
-  if (!validPassword) {
-    return res.status(400).json({ error: "Invalid password" });
-  }
-
-  const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY);
-  res.json({ token });
-});
-
-app.post("/api/register", async (req, res) => {
-  const { username, password } = req.body;
-
-  const existingUser = db.getUserByUsername(username);
-  if (existingUser) {
-    return res.status(400).json({ error: "User already exists" });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const userId = db.createUser(username, hashedPassword);
-
-  res.json({ message: "User created successfully", userId });
+  return res.status(400).json({ error: "Invalid credentials" });
 });
 
 // CATEGORY ENDPOINTS
