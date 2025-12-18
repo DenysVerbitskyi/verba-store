@@ -85,9 +85,10 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/categories`);
       const data = await response.json();
-      setCategories(data);
+      setCategories(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error loading categories:", error);
+      setCategories([]);
     }
   };
 
