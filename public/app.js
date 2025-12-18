@@ -95,9 +95,10 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/products`);
       const data = await response.json();
-      setProducts(data);
+      setProducts(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error loading products:", error);
+      setProducts([]);
     }
   };
 
