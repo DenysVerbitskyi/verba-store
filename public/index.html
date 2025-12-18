@@ -343,13 +343,10 @@
         /* Categories with scroll snap */
         .categories {
             display: flex;
-            gap: 12px;
-            margin-bottom: 40px;
-            overflow-x: auto;
-            scroll-snap-type: x mandatory;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-            padding: 10px 0;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            align-items: flex-start;
         }
 
         .categories::-webkit-scrollbar {
