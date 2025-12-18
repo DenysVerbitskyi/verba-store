@@ -1,264 +1,183 @@
-const initSqlJs = require("sql.js");
-const fs = require("fs");
-const path = require("path");
-
-const DB_PATH = path.join(__dirname, "../database.sqlite");
+const { Pool } = require("pg");
 
 class Database {
   constructor() {
-    this.db = null;
+    // З'єднання з PostgreSQL
+    this.pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl:
+        process.env.NODE_ENV === "production"
+          ? { rejectUnauthorized: false }
+          : false,
+    });
+
     this.init();
   }
 
   async init() {
-    const SQL = await initSqlJs();
-
-    // Try to load existing database
-    if (fs.existsSync(DB_PATH)) {
-      const buffer = fs.readFileSync(DB_PATH);
-      this.db = new SQL.Database(buffer);
-    } else {
-      this.db = new SQL.Database();
-      this.createTables();
-      this.createDefaultAdmin();
+    try {
+      await this.createTables();
+      await this.createDefaultAdmin();
+      console.log("✅ Database initialized");
+    } catch (error) {
+      console.error("❌ Database initialization error:", error);
     }
   }
 
-  save() {
-    if (this.db) {
-      const data = this.db.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(DB_PATH, buffer);
-    }
-  }
-
-  createTables() {
-    this.db.run(`
+  async createTables() {
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    this.db.run(`
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    this.db.run(`
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      description TEXT,
-      price REAL NOT NULL,
-      image_path TEXT,
-      category_id INTEGER,
-      images TEXT,
-      is_sale INTEGER DEFAULT 0,
-      wholesale_price_tier2 REAL,
-      wholesale_price_tier3 REAL,
-      FOREIGN KEY (category_id) REFERENCES categories(id)
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        price DECIMAL(10,2) NOT NULL,
+        image_path TEXT,
+        category_id INTEGER,
+        images TEXT,
+        is_sale INTEGER DEFAULT 0,
+        wholesale_price_tier2 DECIMAL(10,2),
+        wholesale_price_tier3 DECIMAL(10,2),
+        FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
       )
     `);
 
-    this.db.run(`
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         customer_name TEXT NOT NULL,
         customer_phone TEXT,
         customer_email TEXT NOT NULL,
         delivery_address TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        status TEXT DEFAULT 'new',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    this.db.run(`
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS order_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         order_id INTEGER,
         product_id INTEGER,
         product_name TEXT,
-        product_price REAL,
+        product_price DECIMAL(10,2),
         quantity INTEGER,
-        FOREIGN KEY (order_id) REFERENCES orders(id),
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id)
       )
     `);
 
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS order_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER,
-        product_id INTEGER,
-        product_name TEXT,
-        product_price REAL,
-        quantity INTEGER,
-        FOREIGN KEY (order_id) REFERENCES orders(id),
-        FOREIGN KEY (product_id) REFERENCES products(id)
-      )
-    `);
-
-    this.db.run(`
+    await this.pool.query(`
       CREATE TABLE IF NOT EXISTS verification_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         email TEXT NOT NULL,
         code TEXT NOT NULL,
-        expires_at DATETIME NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL
       )
     `);
-
-    this.save();
   }
 
   async createDefaultAdmin() {
     const bcrypt = require("bcryptjs");
     const hashedPassword = await bcrypt.hash("admin123", 10);
 
-    this.db.run("INSERT INTO users (username, password) VALUES (?, ?)", [
-      "admin",
-      hashedPassword,
-    ]);
-    this.save();
+    try {
+      await this.pool.query(
+        "INSERT INTO users (username, password) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING",
+        ["admin", hashedPassword]
+      );
+    } catch (error) {
+      // Вже існує
+    }
   }
 
-  // User methods
+  // USER METHODS
   getUserByUsername(username) {
-    const stmt = this.db.prepare("SELECT * FROM users WHERE username = ?");
-    stmt.bind([username]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      return row;
-    }
-    stmt.free();
-    return null;
+    return this.pool
+      .query("SELECT * FROM users WHERE username = $1", [username])
+      .then((res) => res.rows[0]);
   }
 
   createUser(username, hashedPassword) {
-    this.db.run("INSERT INTO users (username, password) VALUES (?, ?)", [
-      username,
-      hashedPassword,
-    ]);
-    this.save();
-    return this.db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+    return this.pool
+      .query(
+        "INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id",
+        [username, hashedPassword]
+      )
+      .then((res) => res.rows[0].id);
   }
 
-  // Category methods
+  // CATEGORY METHODS
   getAllCategories() {
-    const result = this.db.exec("SELECT * FROM categories ORDER BY name");
-    if (result.length === 0) return [];
-
-    const columns = result[0].columns;
-    const values = result[0].values;
-
-    return values.map((row) => {
-      const obj = {};
-      columns.forEach((col, i) => {
-        obj[col] = row[i];
-      });
-      return obj;
-    });
+    return this.pool
+      .query("SELECT * FROM categories ORDER BY created_at")
+      .then((res) => res.rows);
   }
 
   createCategory(name) {
-    this.db.run("INSERT INTO categories (name) VALUES (?)", [name]);
-    this.save();
-    return this.db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+    return this.pool
+      .query("INSERT INTO categories (name) VALUES ($1) RETURNING id", [name])
+      .then((res) => res.rows[0].id);
   }
 
   deleteCategory(id) {
-    // Delete all products in this category first
-    this.db.run("DELETE FROM products WHERE category_id = ?", [id]);
-    this.db.run("DELETE FROM categories WHERE id = ?", [id]);
-    this.save();
+    return this.pool.query("DELETE FROM categories WHERE id = $1", [id]);
   }
 
-  // Product methods
+  // PRODUCT METHODS
   getAllProducts() {
-    const result = this.db.exec(
-      "SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id ORDER BY p.is_sale DESC, p.name"
-    );
-
-    if (result.length === 0) return [];
-
-    const columns = result[0].columns;
-    const values = result[0].values;
-
-    return values.map((row) => {
-      const obj = {};
-      columns.forEach((col, i) => {
-        obj[col] = row[i];
+    return this.pool
+      .query(
+        `
+      SELECT p.*, c.name as category_name 
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      ORDER BY p.is_sale DESC, p.created_at DESC
+    `
+      )
+      .then((res) => {
+        return res.rows.map((row) => ({
+          ...row,
+          images: row.images ? JSON.parse(row.images) : [],
+        }));
       });
-
-      // Парсити images з JSON
-      if (obj.images) {
-        try {
-          obj.images = JSON.parse(obj.images);
-        } catch (e) {
-          obj.images = [];
-        }
-      }
-
-      return obj;
-    });
   }
 
   getProductsByCategory(categoryId) {
-    const result = this.db.exec(
-      "SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.category_id = ? ORDER BY p.is_sale DESC, p.name",
-      [categoryId]
-    );
-
-    if (result.length === 0) return [];
-
-    const columns = result[0].columns;
-    const values = result[0].values;
-
-    return values.map((row) => {
-      const obj = {};
-      columns.forEach((col, i) => {
-        obj[col] = row[i];
+    return this.pool
+      .query(
+        `
+      SELECT p.*, c.name as category_name 
+      FROM products p 
+      LEFT JOIN categories c ON p.category_id = c.id 
+      WHERE p.category_id = $1 
+      ORDER BY p.is_sale DESC, p.created_at DESC
+    `,
+        [categoryId]
+      )
+      .then((res) => {
+        return res.rows.map((row) => ({
+          ...row,
+          images: row.images ? JSON.parse(row.images) : [],
+        }));
       });
-
-      // Парсити images з JSON
-      if (obj.images) {
-        try {
-          obj.images = JSON.parse(obj.images);
-        } catch (e) {
-          obj.images = [];
-        }
-      }
-
-      return obj;
-    });
-  }
-
-  getProductById(id) {
-    const stmt = this.db.prepare("SELECT * FROM products WHERE id = ?");
-    stmt.bind([id]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      // Parse images JSON
-      if (row.images) {
-        try {
-          row.images = JSON.parse(row.images);
-        } catch (e) {
-          row.images = [];
-        }
-      } else {
-        row.images = [];
-      }
-      return row;
-    }
-    stmt.free();
-    return null;
   }
 
   createProduct(
@@ -267,33 +186,26 @@ class Database {
     price,
     imagePath,
     categoryId,
-    images,
     isSale,
     wholesaleTier2,
     wholesaleTier3
   ) {
-    const imagesJson = JSON.stringify(images);
-    this.db.run(
-      "INSERT INTO products (name, description, price, image_path, category_id, images, is_sale, wholesale_price_tier2, wholesale_price_tier3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [
-        name,
-        description,
-        price,
-        imagePath,
-        categoryId,
-        images,
-        isSale || 0,
-        wholesaleTier2 || null,
-        wholesaleTier3 || null,
-      ]
-    );
-    this.save();
-    return this.db.exec("SELECT last_insert_rowid()")[0].values[0][0];
-  }
-
-  deleteProduct(id) {
-    this.db.run("DELETE FROM products WHERE id = ?", [id]);
-    this.save();
+    return this.pool
+      .query(
+        `INSERT INTO products (name, description, price, image_path, category_id, is_sale, wholesale_price_tier2, wholesale_price_tier3) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [
+          name,
+          description,
+          price,
+          imagePath,
+          categoryId,
+          isSale ? 1 : 0,
+          wholesaleTier2,
+          wholesaleTier3,
+        ]
+      )
+      .then((res) => res.rows[0].id);
   }
 
   updateProduct(
@@ -301,275 +213,165 @@ class Database {
     name,
     description,
     price,
-    imagePath,
     categoryId,
-    images,
     isSale,
     wholesaleTier2,
     wholesaleTier3
   ) {
-    const imagesJson = images ? JSON.stringify(images) : null;
-    if (imagePath && imagesJson) {
-      this.db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, category_id = ?, image_path = ?, is_sale = ?, images = ?, wholesale_price_tier2 = ?, wholesale_price_tier3 = ? WHERE id = ?",
-        [
-          name,
-          description,
-          price,
-          categoryId,
-          imagePath,
-          isSale,
-          imagesJson,
-          wholesaleTier2,
-          wholesaleTier3,
-          id,
-        ]
-      );
-    } else if (imagePath) {
-      this.db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, category_id = ?, image_path = ?, is_sale = ?, wholesale_price_tier2 = ?, wholesale_price_tier3 = ? WHERE id = ?",
-        [
-          name,
-          description,
-          price,
-          categoryId,
-          imagePath,
-          isSale,
-          wholesaleTier2,
-          wholesaleTier3,
-          id,
-        ]
-      );
-    } else if (imagesJson) {
-      this.db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, category_id = ?, is_sale = ?, images = ?, wholesale_price_tier2 = ?, wholesale_price_tier3 = ? WHERE id = ?",
-        [
-          name,
-          description,
-          price,
-          categoryId,
-          isSale,
-          imagesJson,
-          wholesaleTier2,
-          wholesaleTier3,
-          id,
-        ]
-      );
-    } else {
-      this.db.run(
-        "UPDATE products SET name = ?, description = ?, price = ?, category_id = ?, is_sale = ?, wholesale_price_tier2 = ?, wholesale_price_tier3 = ? WHERE id = ?",
-        [
-          name,
-          description,
-          price,
-          categoryId,
-          isSale,
-          wholesaleTier2,
-          wholesaleTier3,
-          id,
-        ]
-      );
-    }
-    this.save();
+    return this.pool.query(
+      `UPDATE products 
+       SET name = $1, description = $2, price = $3, category_id = $4, is_sale = $5, 
+           wholesale_price_tier2 = $6, wholesale_price_tier3 = $7 
+       WHERE id = $8`,
+      [
+        name,
+        description,
+        price,
+        categoryId,
+        isSale ? 1 : 0,
+        wholesaleTier2,
+        wholesaleTier3,
+        id,
+      ]
+    );
   }
 
-  // Order methods
-  createOrder(
+  updateProductImages(productId, images) {
+    return this.pool.query("UPDATE products SET images = $1 WHERE id = $2", [
+      JSON.stringify(images),
+      productId,
+    ]);
+  }
+
+  deleteProduct(id) {
+    return this.pool.query("DELETE FROM products WHERE id = $1", [id]);
+  }
+
+  getProductImages(productId) {
+    return this.pool
+      .query("SELECT images FROM products WHERE id = $1", [productId])
+      .then((res) => {
+        if (res.rows[0] && res.rows[0].images) {
+          return JSON.parse(res.rows[0].images);
+        }
+        return [];
+      });
+  }
+
+  // ORDER METHODS
+  async createOrder(
     customerName,
     customerPhone,
     customerEmail,
     deliveryAddress,
     items
   ) {
-    const totalAmount = items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    this.db.run(
-      "INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address) VALUES (?, ?, ?, ?)",
-      [customerName, customerPhone, customerEmail, deliveryAddress]
-    );
-
-    const orderId = this.db.exec("SELECT last_insert_rowid()")[0].values[0][0];
-
-    items.forEach((item) => {
-      this.db.run(
-        "INSERT INTO order_items (order_id, product_id, product_name, product_price, quantity) VALUES (?, ?, ?, ?, ?)",
-        [orderId, item.id, item.name, item.price, item.quantity]
+      const orderResult = await client.query(
+        "INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address) VALUES ($1, $2, $3, $4) RETURNING id",
+        [customerName, customerPhone, customerEmail, deliveryAddress]
       );
-    });
+      const orderId = orderResult.rows[0].id;
 
-    this.save();
-    return orderId;
+      for (const item of items) {
+        await client.query(
+          "INSERT INTO order_items (order_id, product_id, product_name, product_price, quantity) VALUES ($1, $2, $3, $4, $5)",
+          [orderId, item.id, item.name, item.price, item.quantity]
+        );
+      }
+
+      await client.query("COMMIT");
+      return orderId;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   getAllOrders() {
-    const result = this.db.exec(
-      "SELECT * FROM orders ORDER BY created_at DESC"
-    );
-
-    if (result.length === 0) return [];
-
-    const columns = result[0].columns;
-    const values = result[0].values;
-
-    const orders = values.map((row) => {
-      const obj = {};
-      columns.forEach((col, i) => {
-        obj[col] = row[i];
-      });
-      return obj;
-    });
-
-    // Get items for each order
-    orders.forEach((order) => {
-      const itemsResult = this.db.exec(
-        "SELECT * FROM order_items WHERE order_id = ?",
-        [order.id]
-      );
-
-      if (itemsResult.length > 0) {
-        const itemColumns = itemsResult[0].columns;
-        const itemValues = itemsResult[0].values;
-
-        order.items = itemValues.map((row) => {
-          const obj = {};
-          itemColumns.forEach((col, i) => {
-            obj[col] = row[i];
-          });
-          return obj;
-        });
-      } else {
-        order.items = [];
-      }
-    });
-
-    return orders;
-  }
-
-  getOrderById(id) {
-    const stmt = this.db.prepare("SELECT * FROM orders WHERE id = ?");
-    stmt.bind([id]);
-
-    if (stmt.step()) {
-      const order = stmt.getAsObject();
-      stmt.free();
-
-      // Get order items
-      const itemsResult = this.db.exec(
-        "SELECT * FROM order_items WHERE order_id = ?",
-        [id]
-      );
-
-      if (itemsResult.length > 0) {
-        const itemColumns = itemsResult[0].columns;
-        const itemValues = itemsResult[0].values;
-
-        order.items = itemValues.map((row) => {
-          const obj = {};
-          itemColumns.forEach((col, i) => {
-            obj[col] = row[i];
-          });
-          return obj;
-        });
-      } else {
-        order.items = [];
-      }
-
-      return order;
-    }
-
-    stmt.free();
-    return null;
-  }
-
-  updateOrderStatus(id, status) {
-    this.db.run("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
-    this.save();
-  }
-
-  deleteOrder(id) {
-    this.db.run("DELETE FROM order_items WHERE order_id = ?", [id]);
-    this.db.run("DELETE FROM orders WHERE id = ?", [id]);
-    this.save();
-  }
-
-  // Verification code methods
-  createVerificationCode(email, code, expiresAt) {
-    // Delete old codes for this email
-    this.db.run("DELETE FROM verification_codes WHERE email = ?", [email]);
-
-    this.db.run(
-      "INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
-      [email, code, expiresAt]
-    );
-    this.save();
-  }
-
-  getVerificationCode(email, code) {
-    const stmt = this.db.prepare(
-      "SELECT * FROM verification_codes WHERE email = ? AND code = ? ORDER BY created_at DESC LIMIT 1"
-    );
-    stmt.bind([email, code]);
-    if (stmt.step()) {
-      const row = stmt.getAsObject();
-      stmt.free();
-      return row;
-    }
-    stmt.free();
-    return null;
-  }
-
-  deleteVerificationCode(email, code) {
-    this.db.run("DELETE FROM verification_codes WHERE email = ? AND code = ?", [
-      email,
-      code,
-    ]);
-    this.save();
+    return this.pool
+      .query(
+        `
+      SELECT o.*, 
+             json_agg(json_build_object(
+               'product_name', oi.product_name,
+               'product_price', oi.product_price,
+               'quantity', oi.quantity
+             )) as items
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      GROUP BY o.id
+      ORDER BY o.created_at DESC
+    `
+      )
+      .then((res) => res.rows);
   }
 
   getOrdersByEmail(email) {
-    const result = this.db.exec(
-      "SELECT * FROM orders WHERE customer_email = ? ORDER BY created_at DESC",
-      [email]
+    return this.pool
+      .query(
+        `
+      SELECT o.*, 
+             SUM(oi.product_price * oi.quantity) as total_amount,
+             json_agg(json_build_object(
+               'product_id', oi.product_id,
+               'product_name', oi.product_name,
+               'product_price', oi.product_price,
+               'quantity', oi.quantity
+             )) as items
+      FROM orders o
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      WHERE o.customer_email = $1
+      GROUP BY o.id
+      ORDER BY o.created_at DESC
+    `,
+        [email]
+      )
+      .then((res) => res.rows);
+  }
+
+  updateOrderStatus(orderId, status) {
+    return this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", [
+      status,
+      orderId,
+    ]);
+  }
+
+  deleteOrder(orderId) {
+    return this.pool.query("DELETE FROM orders WHERE id = $1", [orderId]);
+  }
+
+  // VERIFICATION CODE METHODS
+  async saveVerificationCode(email, code) {
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    await this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
+      email,
+    ]);
+    return this.pool.query(
+      "INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)",
+      [email, code, expiresAt]
     );
+  }
 
-    if (result.length === 0) return [];
+  getVerificationCode(email) {
+    return this.pool
+      .query(
+        "SELECT * FROM verification_codes WHERE email = $1 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
+        [email]
+      )
+      .then((res) => res.rows[0]);
+  }
 
-    const columns = result[0].columns;
-    const values = result[0].values;
-
-    return values.map((row) => {
-      const obj = {};
-      columns.forEach((col, i) => {
-        obj[col] = row[i];
-      });
-
-      // Load items for each order
-      const itemsResult = this.db.exec(
-        "SELECT * FROM order_items WHERE order_id = ?",
-        [obj.id]
-      );
-
-      if (itemsResult.length > 0) {
-        const itemColumns = itemsResult[0].columns;
-        const itemValues = itemsResult[0].values;
-
-        obj.items = itemValues.map((row) => {
-          const itemObj = {};
-          itemColumns.forEach((col, i) => {
-            itemObj[col] = row[i];
-          });
-          return itemObj;
-        });
-      } else {
-        obj.items = [];
-      }
-
-      return obj;
-    });
+  deleteVerificationCode(email) {
+    return this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
+      email,
+    ]);
   }
 }
 
-module.exports = Database;
+module.exports = new Database();
