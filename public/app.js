@@ -1153,11 +1153,6 @@ function LoginView({ setToken, setView }) {
           Увійти
         </button>
       </form>
-      <p style={{ marginTop: "20px", color: "#666" }}>
-        Логін за замовчуванням: <strong>admin</strong>
-        <br />
-        Пароль за замовчуванням: <strong>admin123</strong>
-      </p>
     </div>
   );
 }
