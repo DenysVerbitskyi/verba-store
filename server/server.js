@@ -37,8 +37,7 @@ try {
 }
 
 // Database helper functions
-const Database = require("./database");
-const db = new Database();
+const db = require("./database");
 
 // Middleware
 app.use(cors());
