@@ -11,21 +11,18 @@ class Database {
         : false,
     });
 
-    // Обробка помилок з'єднання
     this.pool.on("error", (err) => {
       console.error("❌ Unexpected database error:", err);
     });
 
-    this.init().catch((err) => {
-      console.error("Failed to initialize database:", err);
-      process.exit(1);
-    });
+    this.isReady = false;
+    this.initPromise = this.init();
   }
 
   async init() {
     try {
       console.log("🔄 Connecting to database...");
-      await this.pool.query("SELECT NOW()"); // Тест з'єднання
+      await this.pool.query("SELECT NOW()");
       console.log("✅ Database connected");
 
       await this.createTables();
@@ -34,11 +31,16 @@ class Database {
       await this.createDefaultAdmin();
       console.log("✅ Default admin created");
 
+      this.isReady = true;
       console.log("✅ Database fully initialized");
     } catch (error) {
       console.error("❌ Database initialization error:", error);
-      process.exit(1); // Зупинити якщо БД не працює
+      throw error;
     }
+  }
+
+  async waitForReady() {
+    await this.initPromise;
   }
 
   async createTables() {

@@ -548,6 +548,14 @@ app.use((req, res, next) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+// Почекати на БД перед запуском сервера
+db.waitForReady()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`✅ Server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ Failed to start server:", err);
+    process.exit(1);
+  });
