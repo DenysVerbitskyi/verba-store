@@ -342,7 +342,6 @@ class DatabaseManager {
     stmt.run(orderId);
   }
 
-  // VERIFICATION CODE METHODS
   saveVerificationCode(email, code) {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
