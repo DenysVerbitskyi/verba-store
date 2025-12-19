@@ -9,38 +9,14 @@ class Database {
       ssl: connectionString?.includes("railway")
         ? { rejectUnauthorized: false }
         : false,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
     });
 
     this.pool.on("error", (err) => {
-      console.error("❌ Unexpected database error:", err);
+      console.error("❌ Database pool error:", err);
     });
-
-    this.isReady = false;
-    this.initPromise = this.init();
-  }
-
-  async init() {
-    try {
-      console.log("🔄 Connecting to database...");
-      await this.pool.query("SELECT NOW()");
-      console.log("✅ Database connected");
-
-      await this.createTables();
-      console.log("✅ Tables created");
-
-      await this.createDefaultAdmin();
-      console.log("✅ Default admin created");
-
-      this.isReady = true;
-      console.log("✅ Database fully initialized");
-    } catch (error) {
-      console.error("❌ Database initialization error:", error);
-      throw error;
-    }
-  }
-
-  async waitForReady() {
-    await this.initPromise;
   }
 
   async createTables() {
@@ -168,7 +144,7 @@ class Database {
       SELECT p.*, c.name as category_name 
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
-      ORDER BY p.is_sale DESC, p.created_at DESC
+      ORDER BY p.is_sale DESC, p.id DESC
     `
       )
       .then((res) => {
@@ -187,7 +163,7 @@ class Database {
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
       WHERE p.category_id = $1 
-      ORDER BY p.is_sale DESC, p.created_at DESC
+      ORDER BY p.is_sale DESC, p.id DESC
     `,
         [categoryId]
       )
@@ -367,7 +343,7 @@ class Database {
 
   // VERIFICATION CODE METHODS
   async saveVerificationCode(email, code) {
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
       email,
     ]);
@@ -393,4 +369,23 @@ class Database {
   }
 }
 
-module.exports = new Database();
+const db = new Database();
+
+// Ініціалізація при імпорті
+(async () => {
+  try {
+    console.log("🔄 Initializing database...");
+    await db.pool.query("SELECT NOW()");
+    console.log("✅ Database connected");
+
+    await db.createTables();
+    console.log("✅ Tables created");
+
+    await db.createDefaultAdmin();
+    console.log("✅ Admin created");
+  } catch (error) {
+    console.error("❌ Database init failed:", error);
+  }
+})();
+
+module.exports = db;
