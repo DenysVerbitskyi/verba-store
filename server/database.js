@@ -12,7 +12,7 @@ class Database {
 
     // postgres-js connection
     this.sql = postgres(connectionString, {
-      ssl: "require",
+      ssl: false, // ← БЕЗ SSL для Session Pooler
       max: 20,
       idle_timeout: 30,
       connect_timeout: 10,
