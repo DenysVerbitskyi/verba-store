@@ -1,4 +1,4 @@
-const { Pool } = require("pg");
+const postgres = require("postgres");
 const bcrypt = require("bcryptjs");
 
 class Database {
@@ -10,18 +10,12 @@ class Database {
       process.exit(1);
     }
 
-    this.pool = new Pool({
-      connectionString: connectionString,
-      ssl: {
-        rejectUnauthorized: false,
-      },
+    // postgres-js connection
+    this.sql = postgres(connectionString, {
+      ssl: "require",
       max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
-
-    this.pool.on("error", (err) => {
-      console.error("❌ Unexpected database error:", err);
+      idle_timeout: 30,
+      connect_timeout: 10,
     });
 
     this.initDatabase();
@@ -30,7 +24,7 @@ class Database {
   async initDatabase() {
     try {
       console.log("🔄 Connecting to database...");
-      await this.pool.query("SELECT NOW()");
+      await this.sql`SELECT NOW()`;
       console.log("✅ Database connected");
 
       await this.createTables();
@@ -45,24 +39,24 @@ class Database {
   }
 
   async createTables() {
-    await this.pool.query(`
+    await this.sql`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `;
 
-    await this.pool.query(`
+    await this.sql`
       CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `;
 
-    await this.pool.query(`
+    await this.sql`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -76,9 +70,9 @@ class Database {
         wholesale_price_tier3 DECIMAL(10,2),
         FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
       )
-    `);
+    `;
 
-    await this.pool.query(`
+    await this.sql`
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         customer_name TEXT NOT NULL,
@@ -88,9 +82,9 @@ class Database {
         status TEXT DEFAULT 'new',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `;
 
-    await this.pool.query(`
+    await this.sql`
       CREATE TABLE IF NOT EXISTS order_items (
         id SERIAL PRIMARY KEY,
         order_id INTEGER,
@@ -101,9 +95,9 @@ class Database {
         FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id)
       )
-    `);
+    `;
 
-    await this.pool.query(`
+    await this.sql`
       CREATE TABLE IF NOT EXISTS verification_codes (
         id SERIAL PRIMARY KEY,
         email TEXT NOT NULL,
@@ -111,17 +105,18 @@ class Database {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMP NOT NULL
       )
-    `);
+    `;
   }
 
   async createDefaultAdmin() {
     const hashedPassword = await bcrypt.hash("admin123", 10);
 
     try {
-      await this.pool.query(
-        "INSERT INTO users (username, password) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING",
-        ["admin", hashedPassword]
-      );
+      await this.sql`
+        INSERT INTO users (username, password) 
+        VALUES ('admin', ${hashedPassword}) 
+        ON CONFLICT (username) DO NOTHING
+      `;
     } catch (error) {
       // Already exists
     }
@@ -129,67 +124,62 @@ class Database {
 
   // USER METHODS
   async getUserByUsername(username) {
-    const result = await this.pool.query(
-      "SELECT * FROM users WHERE username = $1",
-      [username]
-    );
-    return result.rows[0];
+    const result = await this
+      .sql`SELECT * FROM users WHERE username = ${username}`;
+    return result[0];
   }
 
   async createUser(username, hashedPassword) {
-    const result = await this.pool.query(
-      "INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id",
-      [username, hashedPassword]
-    );
-    return result.rows[0].id;
+    const result = await this.sql`
+      INSERT INTO users (username, password) 
+      VALUES (${username}, ${hashedPassword}) 
+      RETURNING id
+    `;
+    return result[0].id;
   }
 
   // CATEGORY METHODS
   async getAllCategories() {
-    const result = await this.pool.query(
-      "SELECT * FROM categories ORDER BY created_at"
-    );
-    return result.rows;
+    const result = await this.sql`SELECT * FROM categories ORDER BY created_at`;
+    return result;
   }
 
   async createCategory(name) {
-    const result = await this.pool.query(
-      "INSERT INTO categories (name) VALUES ($1) RETURNING id",
-      [name]
-    );
-    return result.rows[0].id;
+    const result = await this.sql`
+      INSERT INTO categories (name) 
+      VALUES (${name}) 
+      RETURNING id
+    `;
+    return result[0].id;
   }
 
   async deleteCategory(id) {
-    await this.pool.query("DELETE FROM categories WHERE id = $1", [id]);
+    await this.sql`DELETE FROM categories WHERE id = ${id}`;
   }
 
   // PRODUCT METHODS
   async getAllProducts() {
-    const result = await this.pool.query(`
+    const result = await this.sql`
       SELECT p.*, c.name as category_name 
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
       ORDER BY p.is_sale DESC, p.id DESC
-    `);
-    return result.rows.map((row) => ({
+    `;
+    return result.map((row) => ({
       ...row,
       images: row.images ? JSON.parse(row.images) : [],
     }));
   }
 
   async getProductsByCategory(categoryId) {
-    const result = await this.pool.query(
-      `
+    const result = await this.sql`
       SELECT p.*, c.name as category_name 
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
-      WHERE p.category_id = $1 
+      WHERE p.category_id = ${categoryId} 
       ORDER BY p.is_sale DESC, p.id DESC
-    `,
-      [categoryId]
-    );
-    return result.rows.map((row) => ({
+    `;
+    return result.map((row) => ({
       ...row,
       images: row.images ? JSON.parse(row.images) : [],
     }));
@@ -205,21 +195,14 @@ class Database {
     wholesaleTier2,
     wholesaleTier3
   ) {
-    const result = await this.pool.query(
-      `INSERT INTO products (name, description, price, image_path, category_id, is_sale, wholesale_price_tier2, wholesale_price_tier3) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [
-        name,
-        description,
-        price,
-        imagePath,
-        categoryId,
-        isSale ? 1 : 0,
-        wholesaleTier2,
-        wholesaleTier3,
-      ]
-    );
-    return result.rows[0].id;
+    const result = await this.sql`
+      INSERT INTO products (name, description, price, image_path, category_id, is_sale, wholesale_price_tier2, wholesale_price_tier3) 
+      VALUES (${name}, ${description}, ${price}, ${imagePath}, ${categoryId}, ${
+      isSale ? 1 : 0
+    }, ${wholesaleTier2}, ${wholesaleTier3}) 
+      RETURNING id
+    `;
+    return result[0].id;
   }
 
   async updateProduct(
@@ -232,42 +215,33 @@ class Database {
     wholesaleTier2,
     wholesaleTier3
   ) {
-    await this.pool.query(
-      `UPDATE products 
-       SET name = $1, description = $2, price = $3, category_id = $4, is_sale = $5, 
-           wholesale_price_tier2 = $6, wholesale_price_tier3 = $7 
-       WHERE id = $8`,
-      [
-        name,
-        description,
-        price,
-        categoryId,
-        isSale ? 1 : 0,
-        wholesaleTier2,
-        wholesaleTier3,
-        id,
-      ]
-    );
+    await this.sql`
+      UPDATE products 
+      SET name = ${name}, description = ${description}, price = ${price}, category_id = ${categoryId}, 
+          is_sale = ${
+            isSale ? 1 : 0
+          }, wholesale_price_tier2 = ${wholesaleTier2}, wholesale_price_tier3 = ${wholesaleTier3} 
+      WHERE id = ${id}
+    `;
   }
 
   async updateProductImages(productId, images) {
-    await this.pool.query("UPDATE products SET images = $1 WHERE id = $2", [
-      JSON.stringify(images),
-      productId,
-    ]);
+    await this.sql`
+      UPDATE products 
+      SET images = ${JSON.stringify(images)} 
+      WHERE id = ${productId}
+    `;
   }
 
   async deleteProduct(id) {
-    await this.pool.query("DELETE FROM products WHERE id = $1", [id]);
+    await this.sql`DELETE FROM products WHERE id = ${id}`;
   }
 
   async getProductImages(productId) {
-    const result = await this.pool.query(
-      "SELECT images FROM products WHERE id = $1",
-      [productId]
-    );
-    if (result.rows[0] && result.rows[0].images) {
-      return JSON.parse(result.rows[0].images);
+    const result = await this
+      .sql`SELECT images FROM products WHERE id = ${productId}`;
+    if (result[0] && result[0].images) {
+      return JSON.parse(result[0].images);
     }
     return [];
   }
@@ -280,36 +254,29 @@ class Database {
     deliveryAddress,
     items
   ) {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      const orderResult = await client.query(
-        "INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address) VALUES ($1, $2, $3, $4) RETURNING id",
-        [customerName, customerPhone, customerEmail, deliveryAddress]
-      );
-      const orderId = orderResult.rows[0].id;
+    return await this.sql.begin(async (sql) => {
+      const orderResult = await sql`
+        INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address) 
+        VALUES (${customerName}, ${customerPhone}, ${customerEmail}, ${deliveryAddress}) 
+        RETURNING id
+      `;
+      const orderId = orderResult[0].id;
 
       for (const item of items) {
-        await client.query(
-          "INSERT INTO order_items (order_id, product_id, product_name, product_price, quantity) VALUES ($1, $2, $3, $4, $5)",
-          [orderId, item.id, item.name, item.price, item.quantity]
-        );
+        await sql`
+          INSERT INTO order_items (order_id, product_id, product_name, product_price, quantity) 
+          VALUES (${orderId}, ${item.id}, ${item.name}, ${item.price}, ${item.quantity})
+        `;
       }
 
-      await client.query("COMMIT");
       return orderId;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async getAllOrders() {
-    const result = await this.pool.query(`
-      SELECT o.*, 
+    const result = await this.sql`
+      SELECT o.id, o.customer_name, o.customer_phone, o.customer_email, 
+             o.delivery_address, o.status, o.created_at,
              json_agg(json_build_object(
                'product_name', oi.product_name,
                'product_price', oi.product_price,
@@ -319,14 +286,14 @@ class Database {
       LEFT JOIN order_items oi ON o.id = oi.order_id
       GROUP BY o.id
       ORDER BY o.created_at DESC
-    `);
-    return result.rows;
+    `;
+    return result;
   }
 
   async getOrdersByEmail(email) {
-    const result = await this.pool.query(
-      `
-      SELECT o.*, 
+    const result = await this.sql`
+      SELECT o.id, o.customer_name, o.customer_phone, o.customer_email,
+             o.delivery_address, o.status, o.created_at,
              SUM(oi.product_price * oi.quantity) as total_amount,
              json_agg(json_build_object(
                'product_id', oi.product_id,
@@ -336,50 +303,47 @@ class Database {
              )) as items
       FROM orders o
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.customer_email = $1
+      WHERE o.customer_email = ${email}
       GROUP BY o.id
       ORDER BY o.created_at DESC
-    `,
-      [email]
-    );
-    return result.rows;
+    `;
+    return result;
   }
 
   async updateOrderStatus(orderId, status) {
-    await this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", [
-      status,
-      orderId,
-    ]);
+    await this.sql`
+      UPDATE orders 
+      SET status = ${status} 
+      WHERE id = ${orderId}
+    `;
   }
 
   async deleteOrder(orderId) {
-    await this.pool.query("DELETE FROM orders WHERE id = $1", [orderId]);
+    await this.sql`DELETE FROM orders WHERE id = ${orderId}`;
   }
 
   // VERIFICATION CODE METHODS
   async saveVerificationCode(email, code) {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
-      email,
-    ]);
-    await this.pool.query(
-      "INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)",
-      [email, code, expiresAt]
-    );
+    await this.sql`DELETE FROM verification_codes WHERE email = ${email}`;
+    await this.sql`
+      INSERT INTO verification_codes (email, code, expires_at) 
+      VALUES (${email}, ${code}, ${expiresAt})
+    `;
   }
 
   async getVerificationCode(email) {
-    const result = await this.pool.query(
-      "SELECT * FROM verification_codes WHERE email = $1 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-      [email]
-    );
-    return result.rows[0];
+    const result = await this.sql`
+      SELECT * FROM verification_codes 
+      WHERE email = ${email} AND expires_at > NOW() 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `;
+    return result[0];
   }
 
   async deleteVerificationCode(email) {
-    await this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
-      email,
-    ]);
+    await this.sql`DELETE FROM verification_codes WHERE email = ${email}`;
   }
 }
 
