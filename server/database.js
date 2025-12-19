@@ -2,16 +2,24 @@ const { Pool } = require("pg");
 
 class Database {
   constructor() {
-    // З'єднання з PostgreSQL
+    const connectionString = process.env.DATABASE_URL;
+
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl:
-        process.env.NODE_ENV === "production"
-          ? { rejectUnauthorized: false }
-          : false,
+      connectionString: connectionString,
+      ssl: connectionString?.includes("railway")
+        ? { rejectUnauthorized: false }
+        : false,
     });
 
-    this.init();
+    // Обробка помилок з'єднання
+    this.pool.on("error", (err) => {
+      console.error("❌ Unexpected database error:", err);
+    });
+
+    // Затримка для з'єднання
+    setTimeout(() => {
+      this.init();
+    }, 1000);
   }
 
   async init() {
