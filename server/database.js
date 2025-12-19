@@ -16,19 +16,28 @@ class Database {
       console.error("❌ Unexpected database error:", err);
     });
 
-    // Затримка для з'єднання
-    setTimeout(() => {
-      this.init();
-    }, 1000);
+    this.init().catch((err) => {
+      console.error("Failed to initialize database:", err);
+      process.exit(1);
+    });
   }
 
   async init() {
     try {
+      console.log("🔄 Connecting to database...");
+      await this.pool.query("SELECT NOW()"); // Тест з'єднання
+      console.log("✅ Database connected");
+
       await this.createTables();
+      console.log("✅ Tables created");
+
       await this.createDefaultAdmin();
-      console.log("✅ Database initialized");
+      console.log("✅ Default admin created");
+
+      console.log("✅ Database fully initialized");
     } catch (error) {
       console.error("❌ Database initialization error:", error);
+      process.exit(1); // Зупинити якщо БД не працює
     }
   }
 
