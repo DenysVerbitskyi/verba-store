@@ -9,14 +9,24 @@ class Database {
       ssl: connectionString?.includes("railway")
         ? { rejectUnauthorized: false }
         : false,
-      max: 20,
+      max: 10,
+      min: 2,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
 
     this.pool.on("error", (err) => {
       console.error("❌ Database pool error:", err);
     });
+
+    // Keep-alive: ping кожні 30 секунд
+    setInterval(() => {
+      this.pool.query("SELECT 1").catch((err) => {
+        console.error("Keep-alive failed:", err);
+      });
+    }, 30000);
   }
 
   async createTables() {
