@@ -10,7 +10,7 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 const SECRET_KEY = "your-secret-key-change-in-production";
 
 // Email configuration (optional - set these in production)
