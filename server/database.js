@@ -29,8 +29,32 @@ class Database {
     }, 30000);
   }
 
+  // Метод з retry логікою
+  async query(text, params) {
+    const maxRetries = 3;
+    let lastError;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await this.pool.query(text, params);
+      } catch (error) {
+        lastError = error;
+        console.error(
+          `Query failed (attempt ${i + 1}/${maxRetries}):`,
+          error.message
+        );
+
+        if (i < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
   async createTables() {
-    await this.pool.query(`
+    await this.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
@@ -39,7 +63,7 @@ class Database {
       )
     `);
 
-    await this.pool.query(`
+    await this.query(`
       CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -47,7 +71,7 @@ class Database {
       )
     `);
 
-    await this.pool.query(`
+    await this.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -63,7 +87,7 @@ class Database {
       )
     `);
 
-    await this.pool.query(`
+    await this.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         customer_name TEXT NOT NULL,
@@ -75,7 +99,7 @@ class Database {
       )
     `);
 
-    await this.pool.query(`
+    await this.query(`
       CREATE TABLE IF NOT EXISTS order_items (
         id SERIAL PRIMARY KEY,
         order_id INTEGER,
@@ -88,7 +112,7 @@ class Database {
       )
     `);
 
-    await this.pool.query(`
+    await this.query(`
       CREATE TABLE IF NOT EXISTS verification_codes (
         id SERIAL PRIMARY KEY,
         email TEXT NOT NULL,
@@ -104,7 +128,7 @@ class Database {
     const hashedPassword = await bcrypt.hash("admin123", 10);
 
     try {
-      await this.pool.query(
+      await this.query(
         "INSERT INTO users (username, password) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING",
         ["admin", hashedPassword]
       );
@@ -115,74 +139,69 @@ class Database {
 
   // USER METHODS
   getUserByUsername(username) {
-    return this.pool
-      .query("SELECT * FROM users WHERE username = $1", [username])
-      .then((res) => res.rows[0]);
+    return this.query("SELECT * FROM users WHERE username = $1", [
+      username,
+    ]).then((res) => res.rows[0]);
   }
 
   createUser(username, hashedPassword) {
-    return this.pool
-      .query(
-        "INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id",
-        [username, hashedPassword]
-      )
-      .then((res) => res.rows[0].id);
+    return this.query(
+      "INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id",
+      [username, hashedPassword]
+    ).then((res) => res.rows[0].id);
   }
 
   // CATEGORY METHODS
   getAllCategories() {
-    return this.pool
-      .query("SELECT * FROM categories ORDER BY created_at")
-      .then((res) => res.rows);
+    return this.query("SELECT * FROM categories ORDER BY created_at").then(
+      (res) => res.rows
+    );
   }
 
   createCategory(name) {
-    return this.pool
-      .query("INSERT INTO categories (name) VALUES ($1) RETURNING id", [name])
-      .then((res) => res.rows[0].id);
+    return this.query(
+      "INSERT INTO categories (name) VALUES ($1) RETURNING id",
+      [name]
+    ).then((res) => res.rows[0].id);
   }
 
   deleteCategory(id) {
-    return this.pool.query("DELETE FROM categories WHERE id = $1", [id]);
+    return this.query("DELETE FROM categories WHERE id = $1", [id]);
   }
 
   // PRODUCT METHODS
   getAllProducts() {
-    return this.pool
-      .query(
-        `
+    return this.query(
+      `
       SELECT p.*, c.name as category_name 
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
       ORDER BY p.is_sale DESC, p.id DESC
     `
-      )
-      .then((res) => {
-        return res.rows.map((row) => ({
-          ...row,
-          images: row.images ? JSON.parse(row.images) : [],
-        }));
-      });
+    ).then((res) => {
+      return res.rows.map((row) => ({
+        ...row,
+        images: row.images ? JSON.parse(row.images) : [],
+      }));
+    });
   }
 
   getProductsByCategory(categoryId) {
-    return this.pool
-      .query(
-        `
+    return this.query(
+      `
       SELECT p.*, c.name as category_name 
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id 
       WHERE p.category_id = $1 
       ORDER BY p.is_sale DESC, p.id DESC
     `,
-        [categoryId]
-      )
-      .then((res) => {
-        return res.rows.map((row) => ({
-          ...row,
-          images: row.images ? JSON.parse(row.images) : [],
-        }));
-      });
+      [categoryId]
+    ).then((res) => {
+      return res.rows.map((row) => ({
+        ...row,
+        images: row.images ? JSON.parse(row.images) : [],
+      }));
+    });
   }
 
   createProduct(
@@ -195,22 +214,20 @@ class Database {
     wholesaleTier2,
     wholesaleTier3
   ) {
-    return this.pool
-      .query(
-        `INSERT INTO products (name, description, price, image_path, category_id, is_sale, wholesale_price_tier2, wholesale_price_tier3) 
+    return this.query(
+      `INSERT INTO products (name, description, price, image_path, category_id, is_sale, wholesale_price_tier2, wholesale_price_tier3) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [
-          name,
-          description,
-          price,
-          imagePath,
-          categoryId,
-          isSale ? 1 : 0,
-          wholesaleTier2,
-          wholesaleTier3,
-        ]
-      )
-      .then((res) => res.rows[0].id);
+      [
+        name,
+        description,
+        price,
+        imagePath,
+        categoryId,
+        isSale ? 1 : 0,
+        wholesaleTier2,
+        wholesaleTier3,
+      ]
+    ).then((res) => res.rows[0].id);
   }
 
   updateProduct(
@@ -223,7 +240,7 @@ class Database {
     wholesaleTier2,
     wholesaleTier3
   ) {
-    return this.pool.query(
+    return this.query(
       `UPDATE products 
        SET name = $1, description = $2, price = $3, category_id = $4, is_sale = $5, 
            wholesale_price_tier2 = $6, wholesale_price_tier3 = $7 
@@ -242,25 +259,25 @@ class Database {
   }
 
   updateProductImages(productId, images) {
-    return this.pool.query("UPDATE products SET images = $1 WHERE id = $2", [
+    return this.query("UPDATE products SET images = $1 WHERE id = $2", [
       JSON.stringify(images),
       productId,
     ]);
   }
 
   deleteProduct(id) {
-    return this.pool.query("DELETE FROM products WHERE id = $1", [id]);
+    return this.query("DELETE FROM products WHERE id = $1", [id]);
   }
 
   getProductImages(productId) {
-    return this.pool
-      .query("SELECT images FROM products WHERE id = $1", [productId])
-      .then((res) => {
-        if (res.rows[0] && res.rows[0].images) {
-          return JSON.parse(res.rows[0].images);
-        }
-        return [];
-      });
+    return this.query("SELECT images FROM products WHERE id = $1", [
+      productId,
+    ]).then((res) => {
+      if (res.rows[0] && res.rows[0].images) {
+        return JSON.parse(res.rows[0].images);
+      }
+      return [];
+    });
   }
 
   // ORDER METHODS
@@ -299,9 +316,8 @@ class Database {
   }
 
   getAllOrders() {
-    return this.pool
-      .query(
-        `
+    return this.query(
+      `
       SELECT o.*, 
              json_agg(json_build_object(
                'product_name', oi.product_name,
@@ -313,14 +329,12 @@ class Database {
       GROUP BY o.id
       ORDER BY o.created_at DESC
     `
-      )
-      .then((res) => res.rows);
+    ).then((res) => res.rows);
   }
 
   getOrdersByEmail(email) {
-    return this.pool
-      .query(
-        `
+    return this.query(
+      `
       SELECT o.*, 
              SUM(oi.product_price * oi.quantity) as total_amount,
              json_agg(json_build_object(
@@ -335,45 +349,42 @@ class Database {
       GROUP BY o.id
       ORDER BY o.created_at DESC
     `,
-        [email]
-      )
-      .then((res) => res.rows);
+      [email]
+    ).then((res) => res.rows);
   }
 
   updateOrderStatus(orderId, status) {
-    return this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", [
+    return this.query("UPDATE orders SET status = $1 WHERE id = $2", [
       status,
       orderId,
     ]);
   }
 
   deleteOrder(orderId) {
-    return this.pool.query("DELETE FROM orders WHERE id = $1", [orderId]);
+    return this.query("DELETE FROM orders WHERE id = $1", [orderId]);
   }
 
   // VERIFICATION CODE METHODS
   async saveVerificationCode(email, code) {
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
+    await this.query("DELETE FROM verification_codes WHERE email = $1", [
       email,
     ]);
-    return this.pool.query(
+    return this.query(
       "INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)",
       [email, code, expiresAt]
     );
   }
 
   getVerificationCode(email) {
-    return this.pool
-      .query(
-        "SELECT * FROM verification_codes WHERE email = $1 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-        [email]
-      )
-      .then((res) => res.rows[0]);
+    return this.query(
+      "SELECT * FROM verification_codes WHERE email = $1 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
+      [email]
+    ).then((res) => res.rows[0]);
   }
 
   deleteVerificationCode(email) {
-    return this.pool.query("DELETE FROM verification_codes WHERE email = $1", [
+    return this.query("DELETE FROM verification_codes WHERE email = $1", [
       email,
     ]);
   }
@@ -385,7 +396,7 @@ const db = new Database();
 (async () => {
   try {
     console.log("🔄 Initializing database...");
-    await db.pool.query("SELECT NOW()");
+    await db.query("SELECT NOW()");
     console.log("✅ Database connected");
 
     await db.createTables();
