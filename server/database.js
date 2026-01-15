@@ -150,11 +150,19 @@ class Database {
       VALUES (${name}) 
       RETURNING id
     `;
-    return result[0].id;
+    return Number(result[0].id);
   }
 
   async deleteCategory(id) {
     await this.sql`DELETE FROM categories WHERE id = ${id}`;
+  }
+
+  async updateCategory(id, name) {
+  await this.sql`
+    UPDATE categories 
+    SET name = ${name} 
+    WHERE id = ${id}
+  `;
   }
 
   // PRODUCT METHODS
@@ -202,28 +210,22 @@ class Database {
     }, ${wholesaleTier2}, ${wholesaleTier3}) 
       RETURNING id
     `;
-    return result[0].id;
+    return Number(result[0].id);
   }
 
-  async updateProduct(
-    id,
-    name,
-    description,
-    price,
-    categoryId,
-    isSale,
-    wholesaleTier2,
-    wholesaleTier3
-  ) {
-    await this.sql`
-      UPDATE products 
-      SET name = ${name}, description = ${description}, price = ${price}, category_id = ${categoryId}, 
-          is_sale = ${
-            isSale ? 1 : 0
-          }, wholesale_price_tier2 = ${wholesaleTier2}, wholesale_price_tier3 = ${wholesaleTier3} 
-      WHERE id = ${id}
-    `;
-  }
+  async updateProduct(id, name, description, price, categoryId, isSale, wholesaleTier2, wholesaleTier3) {
+  await this.sql`
+    UPDATE products 
+    SET name = ${name}, 
+        description = ${description}, 
+        price = ${price}, 
+        category_id = ${categoryId},
+        is_sale = ${isSale ? 1 : 0},
+        wholesale_price_tier2 = ${wholesaleTier2}, 
+        wholesale_price_tier3 = ${wholesaleTier3} 
+    WHERE id = ${id}
+  `;
+}
 
   async updateProductImages(productId, images) {
     await this.sql`
@@ -247,19 +249,13 @@ class Database {
   }
 
   // ORDER METHODS
-  async createOrder(
-    customerName,
-    customerPhone,
-    customerEmail,
-    deliveryAddress,
-    items
-  ) {
-    return await this.sql.begin(async (sql) => {
-      const orderResult = await sql`
-        INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address) 
-        VALUES (${customerName}, ${customerPhone}, ${customerEmail}, ${deliveryAddress}) 
-        RETURNING id
-      `;
+  async createOrder(customerName, customerPhone, customerEmail, deliveryAddress, comment, items) {
+  return await this.sql.begin(async sql => {
+    const orderResult = await sql`
+      INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address, comment) 
+      VALUES (${customerName}, ${customerPhone}, ${customerEmail}, ${deliveryAddress}, ${comment}) 
+      RETURNING id
+    `;
       const orderId = orderResult[0].id;
 
       for (const item of items) {
@@ -274,41 +270,41 @@ class Database {
   }
 
   async getAllOrders() {
-    const result = await this.sql`
-      SELECT o.id, o.customer_name, o.customer_phone, o.customer_email, 
-             o.delivery_address, o.status, o.created_at,
-             json_agg(json_build_object(
-               'product_name', oi.product_name,
-               'product_price', oi.product_price,
-               'quantity', oi.quantity
-             )) as items
-      FROM orders o
-      LEFT JOIN order_items oi ON o.id = oi.order_id
-      GROUP BY o.id
-      ORDER BY o.created_at DESC
-    `;
-    return result;
-  }
+  const result = await this.sql`
+    SELECT o.id, o.customer_name, o.customer_phone, o.customer_email, 
+           o.delivery_address, o.status, o.created_at, o.comment,  /* ← ДОДАЙ! */
+           json_agg(json_build_object(
+             'product_name', oi.product_name,
+             'product_price', oi.product_price,
+             'quantity', oi.quantity
+           )) as items
+    FROM orders o
+    LEFT JOIN order_items oi ON o.id = oi.order_id
+    GROUP BY o.id
+    ORDER BY o.created_at DESC
+  `;
+  return result;
+}
 
   async getOrdersByEmail(email) {
-    const result = await this.sql`
-      SELECT o.id, o.customer_name, o.customer_phone, o.customer_email,
-             o.delivery_address, o.status, o.created_at,
-             SUM(oi.product_price * oi.quantity) as total_amount,
-             json_agg(json_build_object(
-               'product_id', oi.product_id,
-               'product_name', oi.product_name,
-               'product_price', oi.product_price,
-               'quantity', oi.quantity
-             )) as items
-      FROM orders o
-      LEFT JOIN order_items oi ON o.id = oi.order_id
-      WHERE o.customer_email = ${email}
-      GROUP BY o.id
-      ORDER BY o.created_at DESC
-    `;
-    return result;
-  }
+  const result = await this.sql`
+    SELECT o.id, o.customer_name, o.customer_phone, o.customer_email,
+           o.delivery_address, o.status, o.created_at, o.comment,
+           SUM(oi.product_price * oi.quantity) as total_amount,  /* ← ДОДАЙ! */
+           json_agg(json_build_object(
+             'product_id', oi.product_id,
+             'product_name', oi.product_name,
+             'product_price', oi.product_price,
+             'quantity', oi.quantity
+           )) as items
+    FROM orders o
+    LEFT JOIN order_items oi ON o.id = oi.order_id
+    WHERE o.customer_email = ${email}
+    GROUP BY o.id
+    ORDER BY o.created_at DESC
+  `;
+  return result;
+}
 
   async updateOrderStatus(orderId, status) {
     await this.sql`
@@ -324,27 +320,27 @@ class Database {
 
   // VERIFICATION CODE METHODS
   async saveVerificationCode(email, code) {
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await this.sql`DELETE FROM verification_codes WHERE email = ${email}`;
-    await this.sql`
-      INSERT INTO verification_codes (email, code, expires_at) 
-      VALUES (${email}, ${code}, ${expiresAt})
-    `;
-  }
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await this.sql`DELETE FROM verification_codes WHERE email = ${email}`;
+  await this.sql`
+    INSERT INTO verification_codes (email, code, expires_at) 
+    VALUES (${email}, ${code}, ${expiresAt})
+  `;
+}
 
   async getVerificationCode(email) {
-    const result = await this.sql`
-      SELECT * FROM verification_codes 
-      WHERE email = ${email} AND expires_at > NOW() 
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `;
-    return result[0];
-  }
+  const result = await this.sql`
+    SELECT * FROM verification_codes 
+    WHERE email = ${email} AND expires_at > NOW() 
+    ORDER BY created_at DESC 
+    LIMIT 1
+  `;
+  return result[0];
+}
 
   async deleteVerificationCode(email) {
-    await this.sql`DELETE FROM verification_codes WHERE email = ${email}`;
-  }
+  await this.sql`DELETE FROM verification_codes WHERE email = ${email}`;
+}
 }
 
 module.exports = new Database();

@@ -88,7 +88,7 @@ function seedDatabase() {
       wholesale.tier3
     );
     console.log(
-      `   ✓ ${item.name} - ${item.price} грн (опт: ${wholesale.tier2}/${wholesale.tier3} грн)`
+      `   ✓ ${item.name} - ${item.price} $ (опт: ${wholesale.tier2}/${wholesale.tier3} $)`
     );
   });
 
@@ -141,7 +141,7 @@ function seedDatabase() {
       wholesale.tier3
     );
     console.log(
-      `   ✓ ${item.name} - ${item.price} грн (опт: ${wholesale.tier2}/${wholesale.tier3} грн)`
+      `   ✓ ${item.name} - ${item.price} $ (опт: ${wholesale.tier2}/${wholesale.tier3} $)`
     );
   });
 
@@ -194,7 +194,7 @@ function seedDatabase() {
       wholesale.tier3
     );
     console.log(
-      `   ✓ ${item.name} - ${item.price} грн (опт: ${wholesale.tier2}/${wholesale.tier3} грн)`
+      `   ✓ ${item.name} - ${item.price} $ (опт: ${wholesale.tier2}/${wholesale.tier3} $)`
     );
   });
 
@@ -247,7 +247,7 @@ function seedDatabase() {
       wholesale.tier3
     );
     console.log(
-      `   ✓ ${item.name} - ${item.price} грн (опт: ${wholesale.tier2}/${wholesale.tier3} грн)`
+      `   ✓ ${item.name} - ${item.price} $ (опт: ${wholesale.tier2}/${wholesale.tier3} $)`
     );
   });
 
@@ -300,7 +300,7 @@ function seedDatabase() {
       wholesale.tier3
     );
     console.log(
-      `   ✓ ${item.name} - ${item.price} грн (опт: ${wholesale.tier2}/${wholesale.tier3} грн)`
+      `   ✓ ${item.name} - ${item.price} $ (опт: ${wholesale.tier2}/${wholesale.tier3} $)`
     );
   });
 
@@ -353,7 +353,7 @@ function seedDatabase() {
       wholesale.tier3
     );
     console.log(
-      `   ✓ ${item.name} - ${item.price} грн (опт: ${wholesale.tier2}/${wholesale.tier3} грн)`
+      `   ✓ ${item.name} - ${item.price} $ (опт: ${wholesale.tier2}/${wholesale.tier3} $)`
     );
   });
 

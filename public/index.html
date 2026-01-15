@@ -568,6 +568,14 @@
             margin-bottom: 8px;
             color: var(--text-primary);
             letter-spacing: -0.3px;
+            min-height: 48px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            /* Максимум 2 рядки */
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+
         }
 
         @media (max-width: 768px) {
@@ -615,12 +623,6 @@
             .product-price {
                 font-size: 20px;
             }
-        }
-
-        .product-price::after {
-            content: ' грн';
-            font-size: 16px;
-            color: var(--text-secondary);
         }
 
         @media (max-width: 768px) {

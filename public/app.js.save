@@ -26,7 +26,6 @@ function App() {
     localStorage.getItem("customerEmail")
   );
   const [infoModal, setInfoModal] = useState(null);
-  const [descriptionModal, setDescriptionModal] = useState(null);
   // Обробник секретних кліків на logo
   const handleLogoClick = () => {
     const newCount = logoClickCount + 1;
@@ -84,12 +83,7 @@ function App() {
 
   const loadCategories = async () => {
     try {
-      const response = await fetch(`${API_URL}/categories`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache'
-        }
-      });
+      const response = await fetch(`${API_URL}/categories`);
       const data = await response.json();
       setCategories(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -270,7 +264,6 @@ function App() {
             setSelectedCategory={setSelectedCategory}
             addToCart={addToCart}
             openLightbox={openLightbox}
-            openDescriptionModal={setDescriptionModal}
           />
         </>
       )}
@@ -284,7 +277,6 @@ function App() {
           products={products}
           loadCategories={loadCategories}
           loadProducts={loadProducts}
-          theme={theme}
         />
       )}
 
@@ -308,35 +300,24 @@ function App() {
           {showCart && (
             <div className="cart">
               <h3>Кошик</h3>
-              {cart.map((item) => {
-                // Визначити правильну ціну
-                let displayPrice = parseFloat(item.price) || 0;  // ← parseFloat + fallback
-                
-                if (item.quantity >= 11 && item.wholesale_price_tier3) {
-                  displayPrice = parseFloat(item.wholesale_price_tier3);
-                } else if (item.quantity >= 4 && item.wholesale_price_tier2) {
-                  displayPrice = parseFloat(item.wholesale_price_tier2);
-                }
-                
-                return (
-                  <div key={item.id} className="cart-item">
+              {cart.map((item) => (
+                <div key={item.id} className="cart-item">
+                  <div>
+                    <div>{item.name}</div>
                     <div>
-                      <div>{item.name}</div>
-                      <div>
-                        {displayPrice.toFixed(2)} $ × {item.quantity}
-                      </div>
-                    </div>
-                    <div>
-                      <button
-                        className="btn btn-danger"
-                        onClick={() => removeFromCart(item.id)}
-                      >
-                        ✕
-                      </button>
+                      {item.price} $ × {item.quantity}
                     </div>
                   </div>
-                );
-              })}
+                  <div>
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => removeFromCart(item.id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
               <div className="cart-total">
                 Всього: {getTotalPrice().toFixed(2)} $
               </div>
@@ -392,39 +373,6 @@ function App() {
       {infoModal && (
         <InfoModal type={infoModal} onClose={() => setInfoModal(null)} />
       )}
-      {descriptionModal && (
-  <div className="modal" onClick={() => setDescriptionModal(null)}>
-    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-      <button
-        onClick={() => setDescriptionModal(null)}
-        style={{
-          position: "absolute",
-          right: "20px",
-          top: "20px",
-          background: "none",
-          border: "none",
-          fontSize: "32px",
-          cursor: "pointer",
-          color: "#999",
-        }}
-      >
-        ×
-      </button>
-      <h2>{descriptionModal.name}</h2>
-      <p style={{ whiteSpace: "pre-wrap", lineHeight: "1.6" }}>
-        {descriptionModal.description}
-      </p>
-      <button
-        onClick={() => setDescriptionModal(null)}
-        className="btn btn-primary"
-        style={{ marginTop: "20px", width: "100%" }}
-      >
-        Закрити
-      </button>
-    </div>
-  </div>
-)}
-
     </div>
   );
 }
@@ -535,7 +483,6 @@ function ShopView({
   setSelectedCategory,
   addToCart,
   openLightbox,
-  openDescriptionModal,
 }) {
   const [displayCount, setDisplayCount] = useState(20);
   const ITEMS_PER_PAGE = 20;
@@ -586,7 +533,6 @@ function ShopView({
               product={product}
               addToCart={addToCart}
               openLightbox={openLightbox}
-              openDescriptionModal={openDescriptionModal}
             />
           ))
         )}
@@ -789,7 +735,9 @@ function ProductCard({
 
         {product.description && product.description.length > 120 && (
           <button
-            onClick={() => openDescriptionModal({ name: product.name, description: product.description })}
+            onClick={() =>
+              openDescriptionModal(product.name, product.description)
+            }
             style={{
               background: "none",
               border: "none",
@@ -938,7 +886,6 @@ function CheckoutModal({
     customerPhone: "",
     customerEmail: customerEmail || "",
     deliveryAddress: "",
-    comment: "",
   });
   const [loading, setLoading] = useState(true);
 
@@ -1052,7 +999,7 @@ function CheckoutModal({
               onChange={(e) =>
                 setFormData({ ...formData, customerName: e.target.value })
               }
-              placeholder="ТОВ Компанія або Дмитро Гордон"
+              placeholder="ТОВ Компанія або Іванов Іван"
               required
             />
           </div>
@@ -1094,17 +1041,6 @@ function CheckoutModal({
               placeholder="Нова Пошта, відділення №5, м. Київ"
             />
           </div>
-          <div className="form-group">
-            <label>Коментар (необов'язково)</label>
-            <textarea
-              value={formData.comment}
-              onChange={(e) =>
-                setFormData({ ...formData, comment: e.target.value })
-              }
-              placeholder="Ваші побажання або зауваження..."
-              rows="3"
-            />
-          </div>
           <div
             style={{ fontSize: "18px", fontWeight: "600", marginTop: "15px" }}
           >
@@ -1118,18 +1054,21 @@ function CheckoutModal({
                   }}
                 >
                   Без знижки:{" "}
-                  {cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}{" "}
+                  {cart.reduce(
+                    (sum, item) => sum + item.price * item.quantity,
+                    0
+                  )}{" "}
                   $
                 </div>
                 <div style={{ color: "#0071e3" }}>
-                  Загальна сума: {getTotalPrice().toFixed(2)} $
+                  Загальна сума: {getTotalPrice()} $
                 </div>
                 <div style={{ color: "#28a745", fontSize: "14px" }}>
-                  💰 Економія: {getSavings().toFixed(2)} $
+                  💰 Економія: {getSavings()} $
                 </div>
               </>
             ) : (
-              <div>Загальна сума: {getTotalPrice().toFixed(2)} $</div>
+              <div>Загальна сума: {getTotalPrice()} $</div>
             )}
           </div>{" "}
           <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
@@ -1226,7 +1165,6 @@ function AdminPanel({
   products,
   loadCategories,
   loadProducts,
-  theme,
 }) {
   const [activeTab, setActiveTab] = useState("categories");
   const [orders, setOrders] = useState([]);
@@ -1279,7 +1217,6 @@ function AdminPanel({
           categories={categories}
           loadCategories={loadCategories}
           token={token}
-          theme={theme}
         />
       )}
 
@@ -1289,7 +1226,6 @@ function AdminPanel({
           categories={categories}
           loadProducts={loadProducts}
           token={token}
-          theme={theme}
         />
       )}
 
@@ -1300,11 +1236,9 @@ function AdminPanel({
   );
 }
 
-function CategoriesTab({ categories, loadCategories, token, theme }) {
+function CategoriesTab({ categories, loadCategories, token }) {
   const [showAdd, setShowAdd] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [editingCategory, setEditingCategory] = useState(null);
-  const [editName, setEditName] = useState("");
 
   const addCategory = async (e) => {
     e.preventDefault();
@@ -1349,29 +1283,6 @@ function CategoriesTab({ categories, loadCategories, token, theme }) {
     }
   };
 
-  const updateCategory = async (e) => {
-  e.preventDefault();
-  
-  try {
-    const response = await fetch(`${API_URL}/categories/${editingCategory.id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ name: editName }),
-    });
-
-    if (response.ok) {
-      setEditingCategory(null);
-      setEditName("");
-      loadCategories();
-    }
-  } catch (error) {
-    console.error("Error updating category:", error);
-  }
-};
-
   return (
     <div>
       <button
@@ -1401,68 +1312,32 @@ function CategoriesTab({ categories, loadCategories, token, theme }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
         {categories.map((cat) => (
-  <div
-    key={cat.id}
-    style={{
-      padding: "15px",
-      background: theme === "dark" ? "#374151" : "#f8f9fa",
-      color: theme === "dark" ? "white" : "#333",
-      borderRadius: "5px",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-    }}
-  >
-    {editingCategory?.id === cat.id ? (
-      // Режим редагування
-      <form onSubmit={updateCategory} style={{ display: "flex", gap: "10px", flex: 1 }}>
-        <input
-          type="text"
-          value={editName}
-          onChange={(e) => setEditName(e.target.value)}
-          style={{ flex: 1 }}
-          autoFocus
-        />
-        <button type="submit" className="btn btn-success">Зберегти</button>
-        <button 
-          type="button" 
-          className="btn btn-secondary"
-          onClick={() => setEditingCategory(null)}
-        >
-          Скасувати
-        </button>
-      </form>
-    ) : (
-      // Звичайний режим
-      <>
-        <span>{cat.name}</span>
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setEditingCategory(cat);
-              setEditName(cat.name);
+          <div
+            key={cat.id}
+            style={{
+              padding: "15px",
+              background: "#f8f9fa",
+              borderRadius: "5px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            Редагувати
-          </button>
-          <button
-            className="btn btn-danger"
-            onClick={() => deleteCategory(cat.id)}
-          >
-            Видалити
-          </button>
-        </div>
-      </>
-    )}
-  </div>
-))}
+            <span>{cat.name}</span>
+            <button
+              className="btn btn-danger"
+              onClick={() => deleteCategory(cat.id)}
+            >
+              Видалити
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function ProductsTab({ products, categories, loadProducts, token, theme }) {
+function ProductsTab({ products, categories, loadProducts, token }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -1653,8 +1528,7 @@ function ProductsTab({ products, categories, loadProducts, token, theme }) {
           onSubmit={saveProduct}
           style={{
             marginBottom: "20px",
-            background: theme === "dark" ? "#374151" : "#f8f9fa",
-            color: theme === "dark" ? "white" : "#333",
+            background: "#f8f9fa",
             padding: "20px",
             borderRadius: "10px",
           }}
@@ -2088,11 +1962,6 @@ function OrdersTab({ orders, loadOrders, token }) {
                   <strong>📍 Адреса:</strong> {order.delivery_address}
                 </div>
               )}
-              {order.comment && (
-                <div>
-                  <strong>💬 Коментар:</strong> {order.comment}
-                </div>
-              )}
             </div>
 
             <div style={{ marginBottom: "10px" }}>
@@ -2170,9 +2039,6 @@ function MyOrdersView({
     if (customerToken) {
       loadOrders();
     }
-    else {
-    setStep('email');
-  }
   }, [customerToken]);
 
   const loadOrders = async () => {
@@ -2182,12 +2048,6 @@ function MyOrdersView({
           Authorization: `Bearer ${customerToken}`,
         },
       });
-
-      if (response.status === 403 || response.status === 401) {
-      customerLogout();
-      alert('Сесія застаріла. Будь ласка, увійдіть знову.');
-      return;
-    }
 
       if (response.ok) {
         const data = await response.json();
@@ -2439,8 +2299,8 @@ function MyOrdersView({
   }
 
   if (step === "orders") {
-  return (
-    <div className="container" style={{ marginTop: "120px", minHeight: "calc(100vh - 200px)" }}>
+    return (
+      <div className="admin-panel">
         <div
           style={{
             display: "flex",
@@ -2488,7 +2348,7 @@ function MyOrdersView({
                         color: "#28a745",
                       }}
                     >
-                      {order.items?.reduce((sum, item) => sum + (item.product_price * item.quantity), 0).toFixed(2)} $
+                      {order.total_amount?.toFixed(2)} $
                     </div>
                     <div style={{ fontSize: "12px", color: "#666" }}>
                       {order.status === "new" && "🟡 Нове"}
@@ -2630,7 +2490,7 @@ function InfoModal({ type, onClose }) {
         <p><strong>Нова Пошта:</strong></p>
         <ul>
           <li>Доставка у відділення - 1-2 дні, від 50 $</li>
-          <li>Адресна доставка кур'єром - 1-2 дні, від 70 $</li>
+          <li>Адресна доставка кур'єром - 1-2 дні, від 70 $н</li>
           <li>Безкоштовна доставка при замовленні від 2000 $</li>
         </ul>
         
